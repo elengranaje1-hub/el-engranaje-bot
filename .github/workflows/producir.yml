@@ -1,4 +1,4 @@
-﻿name: Producir video
+name: Producir video
 
 on:
   schedule:
@@ -31,7 +31,9 @@ jobs:
           YT_TOKEN: ${{ secrets.YT_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scripts/producir.py
+        run: |
+          cd scripts
+          python producir.py
 
       - name: Guardar estado de la serie
         run: |
