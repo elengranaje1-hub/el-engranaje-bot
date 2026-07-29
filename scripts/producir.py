@@ -3,19 +3,8 @@
 """
 producir.py — orquestador principal de El Engranaje.
 Corre completo en GitHub Actions (cron 3x/día).
-
-Flujo:
-  1. Lee/actualiza estado de la serie (config/estado_serie.json)
-  2. Genera guion con Groq
-  3. Genera voz con edge-tts (+ word boundaries para subtítulos)
-  4. Genera 3 placas de arte con Pollinations
-  5. Renderiza el video con composicion.py
-  6. Mezcla audio + video con ffmpeg
-  7. Sube a YouTube
-  8. Notifica por Telegram
 """
 import os
-import sys
 import json
 import subprocess
 import tempfile
@@ -24,12 +13,13 @@ import guion
 import voz
 import arte
 import composicion as comp
+import youtube_upload as yt
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.join(AQUI, "..")
 ESTADO_PATH = os.path.join(RAIZ, "config", "estado_serie.json")
 
-# ── Telegram ────────────────────────────────────────────────────────────────
+
 def telegram(msg):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat  = os.environ.get("TELEGRAM_CHAT_ID")
@@ -45,48 +35,29 @@ def telegram(msg):
     except Exception as e:
         print(f"Telegram error: {e}")
 
-# ── Estado de la serie ───────────────────────────────────────────────────────
+
 def leer_estado():
     if os.path.exists(ESTADO_PATH):
         with open(ESTADO_PATH, encoding="utf-8") as f:
             return json.load(f)
     return {"tema_idx": 0, "videos_producidos": 0}
 
+
 def guardar_estado(estado):
     os.makedirs(os.path.dirname(ESTADO_PATH), exist_ok=True)
     with open(ESTADO_PATH, "w", encoding="utf-8") as f:
         json.dump(estado, f, ensure_ascii=False, indent=2)
 
-# ── YouTube ──────────────────────────────────────────────────────────────────
-def subir_youtube(mp4, titulo, descripcion, hashtags):
-    """
-    Reutiliza el módulo de subida de SpiritualWave.
-    Por ahora guarda el video localmente si no hay credenciales.
-    """
-    yt_secret = os.environ.get("YT_CLIENT_SECRET")
-    yt_token  = os.environ.get("YT_TOKEN")
-    if not yt_secret or not yt_token:
-        print("YouTube: sin credenciales — video guardado localmente.")
-        return None
 
-    # TODO: conectar módulo youtube_upload.py (fase 3)
-    print("YouTube: subida pendiente de implementar (fase 3)")
-    return None
-
-# ── Sujetos visuales para cada escena ───────────────────────────────────────
 def sujetos_de(guion_data):
-    """
-    Extrae 3 sujetos visuales del guion para las 3 placas de arte.
-    Por ahora los deriva del tema — en fase 3 lo hace Groq directamente.
-    """
     titulo = guion_data.get("titulo_video", "")
     return [
-        f"person trapped running in a giant hamster wheel, city background, {titulo}",
-        f"hands reaching for coins with invisible chains, dramatic light, {titulo}",
-        f"crowd of people looking up at a giant clock, symbolic, {titulo}",
+        f"person trapped running in a giant hamster wheel, city background, allegorical, {titulo}",
+        f"hands reaching for coins with invisible chains, dramatic light, symbolic, {titulo}",
+        f"crowd of people looking up at a giant clock, symbolic, moody, {titulo}",
     ]
 
-# ── Mezcla audio + video ─────────────────────────────────────────────────────
+
 def mezclar(video_sin_audio, audio_mp3, salida_final):
     subprocess.run([
         "ffmpeg", "-y",
@@ -98,7 +69,7 @@ def mezclar(video_sin_audio, audio_mp3, salida_final):
         salida_final,
     ], check=True, capture_output=True)
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+
 def main():
     estado = leer_estado()
     telegram("⚙️ <b>El Engranaje</b> — iniciando producción...")
@@ -126,7 +97,7 @@ def main():
         placas = arte.generar_placas(sujetos)
         telegram(f"🎨 Arte listo ({len(placas)} escenas)")
 
-        # 4. Composición (video sin audio)
+        # 4. Composición
         print("Renderizando video...")
         dur_cartel = 0.10 + len(guion_data["cartel_gancho"]) * 0.22 + 0.5
         dur_total  = dur_cartel + dur_voz
@@ -144,25 +115,35 @@ def main():
             carpeta_salida=tmp,
         )
 
-        # 5. Mezclar audio
+        # 5. Mezcla audio + video
         print("Mezclando audio...")
         video_final = os.path.join(tmp, "final.mp4")
         mezclar(video_mudo, mp3, video_final)
         tam = os.path.getsize(video_final) // (1024 * 1024)
-        print(f"  Video final: {tam} MB")
+        print(f"  Video final: {tam} MB, {dur_total:.1f}s")
         telegram(f"🎬 Video listo ({tam} MB, {dur_total:.1f}s)")
 
-        # 6. Subida (fase 3)
+        # 6. Subida a YouTube
+        print("Subiendo a YouTube...")
         desc = (
             f"{guion_data['guion_completo']}\n\n"
             + " ".join(guion_data.get("hashtags", []))
         )
-        url = subir_youtube(video_final, guion_data["titulo_video"], desc,
-                            guion_data.get("hashtags", []))
-        if url:
-            telegram(f"✅ Subido: {url}")
-        else:
-            telegram("⚠️ Video producido pero subida pendiente (fase 3)")
+        hashtags = guion_data.get("hashtags", [])
+        tags = [t.replace("#", "") for t in hashtags]
+
+        try:
+            url = yt.subir(
+                mp4_path=video_final,
+                titulo=guion_data["titulo_video"],
+                descripcion=desc,
+                tags=tags,
+            )
+            telegram(f"✅ Subido a YouTube: {url}")
+        except Exception as e:
+            print(f"Error subiendo a YouTube: {e}")
+            telegram(f"⚠️ Error en subida: {e}")
+            url = None
 
     # 7. Guardar estado
     estado["videos_producidos"] = estado.get("videos_producidos", 0) + 1
