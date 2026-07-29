@@ -12,7 +12,7 @@ from groq import Groq
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PROMPT_PATH = os.path.join(AQUI, "..", "config", "prompt_guion.txt")
 
-MODELO = "llama3-70b-8192"
+MODELO = "llama-3.3-70b-versatile"
 
 TEMAS = [
     "la carrera de la rata y el trabajo moderno",
