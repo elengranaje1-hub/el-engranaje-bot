@@ -28,16 +28,7 @@ jobs:
         env:
           YT_TOKEN: ${{ secrets.YT_TOKEN }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-        run: |
-          python3 -c "
-import os, base64, json
-t = os.environ['YT_TOKEN'].strip()
-data = base64.b64decode(t + '==').decode()
-open('/tmp/yt_token.json','w').write(data)
-s = os.environ['YT_CLIENT_SECRET'].strip()
-open('/tmp/yt_client_secret.json','w').write(s)
-print('Credenciales OK')
-"
+        run: python scripts/preparar_yt.py
 
       - name: Ejecutar pipeline
         env:
